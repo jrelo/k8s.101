@@ -160,6 +160,15 @@
     flex: 1;
     overflow: hidden;
   }
+  #form-panel, #raw-panel {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+  }
+  #output-panel {
+    grid-column: 3;
+    grid-row: 1;
+  }
 
   /* LEFT SIDEBAR */
   #sidebar {
@@ -480,6 +489,122 @@
   ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
 
+  /* RAW EDITOR */
+  #raw-editor-wrap {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+  }
+  #raw-editor {
+    flex: 1;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.65;
+    border: none;
+    outline: none;
+    resize: none;
+    padding: 14px 16px;
+    width: 100%;
+    tab-size: 2;
+    white-space: pre;
+    overflow: auto;
+  }
+  #raw-editor-actions {
+    display: flex;
+    gap: 6px;
+    padding: 8px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--bg2);
+    flex-shrink: 0;
+    align-items: center;
+  }
+  #raw-editor-actions .raw-hint {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+    margin-left: auto;
+  }
+
+  /* PASSTHROUGH BADGE */
+  .passthrough-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    background: rgba(224,184,74,0.15);
+    color: var(--yellow);
+    border: 1px solid rgba(224,184,74,0.3);
+    padding: 2px 7px;
+    border-radius: 2px;
+    margin-left: 8px;
+  }
+  .passthrough-badge .dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--yellow);
+    flex-shrink: 0;
+  }
+  #toast {
+    position: fixed;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%) translateY(16px);
+    background: var(--bg4);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 7px 16px;
+    border-radius: 2px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 999;
+    white-space: nowrap;
+  }
+  #toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  #toast.error { border-color: var(--red); color: var(--red); }
+  #toast.success { border-color: var(--green); color: var(--green); }
+
+  /* DRAG OVERLAY */
+  #drop-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 998;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+  }
+  #drop-overlay.active { display: flex; }
+  #drop-overlay .drop-box {
+    border: 2px dashed var(--accent);
+    border-radius: 4px;
+    padding: 48px 80px;
+    text-align: center;
+  }
+  #drop-overlay .drop-title {
+    font-family: var(--mono);
+    font-size: 16px;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  #drop-overlay .drop-sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text2);
+  }
+
   /* Port row */
   .port-row { display: flex; gap: 4px; margin-bottom: 4px; align-items: center; }
   .port-row input { flex: 1; }
@@ -523,6 +648,7 @@
   <div class="spacer"></div>
   <div class="topbar-right">
     <button class="btn-sm" id="theme-btn" onclick="cycleTheme()">theme: minima</button>
+    <label class="btn-sm" id="load-btn" style="cursor:pointer">load .yaml<input type="file" accept=".yaml,.yml" style="display:none" onchange="loadYamlFile(event)"></label>
     <button class="btn-sm btn-primary" onclick="downloadYaml()">export .yaml</button>
   </div>
 </div>
@@ -571,6 +697,9 @@
       <div class="sidebar-item" onclick="resetForm()">
         <div class="si-dot"></div>Reset
       </div>
+      <div class="sidebar-item" id="raw-sidebar-btn" onclick="switchSection('raw')">
+        <div class="si-dot"></div>Raw Editor<div class="si-tag">esc</div>
+      </div>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-label">presets</div>
@@ -593,9 +722,34 @@
   <div id="form-panel">
     <div class="panel-header">
       <div class="panel-title">CONFIGURATION <span id="resource-label">/ Deployment</span></div>
+      <span id="passthrough-badge" class="passthrough-badge" style="display:none">
+        <span class="dot"></span>passthrough
+      </span>
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-family:var(--mono);font-size:10px;color:var(--text3)">
+          <input type="checkbox" id="passthrough-toggle" style="width:12px;height:12px;accent-color:var(--yellow)" onchange="togglePassthrough(this.checked)">
+          preserve unknown fields
+        </label>
+      </div>
     </div>
     <div class="form-body" id="form-body">
       <!-- dynamically rendered -->
+    </div>
+  </div>
+
+  <!-- RAW EDITOR PANEL (alternate center, shown when raw section active) -->
+  <div id="raw-panel" style="display:none;background:var(--bg3);border-right:1px solid var(--border);flex-direction:column;overflow:hidden;">
+    <div class="panel-header">
+      <div class="panel-title">RAW EDITOR <span style="color:var(--yellow)">/ escape hatch</span></div>
+      <div style="margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--text3)">unknown fields preserved on apply</div>
+    </div>
+    <div id="raw-editor-wrap">
+      <textarea id="raw-editor" spellcheck="false"></textarea>
+      <div id="raw-editor-actions">
+        <button class="btn-sm btn-primary" onclick="applyRawEditor()">apply</button>
+        <button class="btn-sm" onclick="syncRawFromState()">reset to current</button>
+        <span class="raw-hint">apply re-parses into form state &nbsp;|&nbsp; use tab key for indent</span>
+      </div>
     </div>
   </div>
 
@@ -611,6 +765,14 @@
     </div>
   </div>
 </div>
+
+<div id="drop-overlay">
+  <div class="drop-box">
+    <div class="drop-title">drop .yaml to load</div>
+    <div class="drop-sub">Deployment · Service · ConfigMap · Ingress · CronJob</div>
+  </div>
+</div>
+<div id="toast"></div>
 
 <div id="statusbar">
   <div class="status-item ok"><div class="dot"></div>valid yaml</div>
@@ -686,13 +848,103 @@ const state = {
   failedJobsLimit: 1,
 };
 
+// ---- PASSTHROUGH STATE ----
+// When passthrough mode is on and a file was loaded, we keep the original
+// parsed doc here and deep-merge our generated fields back into it on export.
+let passthroughDoc   = null;   // original parsed object from loaded file
+let passthroughText  = null;   // original raw text (for raw editor baseline)
+let passthroughMode  = false;
+
+function togglePassthrough(enabled) {
+  passthroughMode = enabled;
+  document.getElementById('passthrough-badge').style.display = enabled && passthroughDoc ? 'inline-flex' : 'none';
+  updateOutput();
+}
+
+// Deep-merge src into dst in-place, preserving keys in dst not present in src.
+function deepMerge(dst, src) {
+  if (typeof src !== 'object' || src === null) return;
+  for (const key of Object.keys(src)) {
+    if (Array.isArray(src[key])) {
+      dst[key] = src[key];
+    } else if (typeof src[key] === 'object' && src[key] !== null && typeof dst[key] === 'object' && dst[key] !== null && !Array.isArray(dst[key])) {
+      deepMerge(dst[key], src[key]);
+    } else {
+      dst[key] = src[key];
+    }
+  }
+}
+
+// Re-serialize a plain JS object back to YAML string.
+function serializeYaml(obj, indent) {
+  indent = indent || 0;
+  const sp = '  '.repeat(indent);
+  if (obj === null || obj === undefined) return 'null';
+  if (typeof obj === 'boolean') return obj.toString();
+  if (typeof obj === 'number') return obj.toString();
+  if (typeof obj === 'string') {
+    if (/[:{}\[\],&*?|<>=!%@`#\n]/.test(obj) || obj === '' || /^\s/.test(obj) || /\s$/.test(obj)) {
+      return '"' + obj.replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/\n/g,'\\n') + '"';
+    }
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    if (obj.length === 0) return '[]';
+    return obj.map(item => {
+      if (typeof item === 'object' && item !== null) {
+        const inner = serializeYaml(item, indent + 1);
+        // first key on same line as dash
+        const lines = inner.split('\n');
+        lines[0] = sp + '- ' + lines[0].trimStart();
+        return lines.join('\n');
+      }
+      return sp + '- ' + serializeYaml(item, 0);
+    }).join('\n');
+  }
+  // object
+  const keys = Object.keys(obj);
+  if (keys.length === 0) return '{}';
+  return keys.map(k => {
+    const v = obj[k];
+    if (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length > 0) {
+      return sp + k + ':\n' + serializeYaml(v, indent + 1);
+    }
+    if (Array.isArray(v) && v.length > 0) {
+      return sp + k + ':\n' + serializeYaml(v, indent + 1);
+    }
+    return sp + k + ': ' + serializeYaml(v, 0);
+  }).join('\n');
+}
+
+// Build the passthrough-merged YAML: start from original doc, deep-merge
+// our freshly generated fields, re-serialize.
+function generatePassthroughYaml() {
+  if (!passthroughDoc) return generateYaml();
+  // deep clone original
+  const merged = JSON.parse(JSON.stringify(passthroughDoc));
+  // parse our clean generated yaml into an object
+  let ours;
+  try { ours = parseYaml(generateYaml()); } catch(e) { return generateYaml(); }
+  deepMerge(merged, ours);
+  return serializeYaml(merged) + '\n';
+}
+
 // ---- SECTIONS ----
 const SECTIONS = ['metadata','spec','containers','ports','env','resources','probes','volumes','labels','affinity'];
 
 function switchSection(sec) {
   document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
   event.currentTarget.classList.add('active');
-  renderForm(sec);
+
+  const isRaw = sec === 'raw';
+  document.getElementById('form-panel').style.display = isRaw ? 'none' : '';
+  document.getElementById('raw-panel').style.display  = isRaw ? 'flex' : 'none';
+
+  if (isRaw) {
+    syncRawFromState();
+  } else {
+    renderForm(sec);
+  }
 }
 
 function switchResource(r) {
@@ -700,11 +952,12 @@ function switchResource(r) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   event.currentTarget.classList.add('active');
   document.getElementById('resource-label').textContent = '/ ' + r;
-  document.querySelector('.status-item:nth-child(2) .dot + *') || null;
   document.querySelectorAll('.status-item')[1].innerHTML = '<div class="dot"></div>' + r;
-  renderForm('metadata');
-  // reset sidebar selection
+  // if raw panel was open, close it and restore form panel
+  document.getElementById('raw-panel').style.display  = 'none';
+  document.getElementById('form-panel').style.display = '';
   document.querySelectorAll('.sidebar-item').forEach((el,i) => el.classList.toggle('active', i === 0));
+  renderForm('metadata');
   updateOutput();
 }
 
@@ -1265,13 +1518,41 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// ---- RAW EDITOR ----
+function syncRawFromState() {
+  const yaml = passthroughMode && passthroughDoc ? generatePassthroughYaml() : generateYaml();
+  const ta = document.getElementById('raw-editor');
+  ta.value = yaml;
+}
+
+function applyRawEditor() {
+  const text = document.getElementById('raw-editor').value;
+  ingestYaml(text, true); // true = stay on raw panel
+}
+
+// Tab key inserts 2 spaces in raw editor
+document.addEventListener('keydown', e => {
+  if (e.key === 'Tab' && document.activeElement.id === 'raw-editor') {
+    e.preventDefault();
+    const ta = document.activeElement;
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    ta.value = ta.value.slice(0, start) + '  ' + ta.value.slice(end);
+    ta.selectionStart = ta.selectionEnd = start + 2;
+  }
+});
+
 // ---- OUTPUT ----
 function updateOutput() {
-  const yaml = generateYaml();
+  const yaml = passthroughMode && passthroughDoc ? generatePassthroughYaml() : generateYaml();
   const el = document.getElementById('yaml-output');
   el.innerHTML = highlight(yaml);
   const lines = yaml.split('\n').length;
   document.getElementById('status-lines').innerHTML = `<div class="dot"></div>${lines} lines`;
+  // keep raw editor in sync if it's visible
+  if (document.getElementById('raw-panel').style.display !== 'none') {
+    document.getElementById('raw-editor').value = yaml;
+  }
 }
 
 // ---- PRESETS ----
@@ -1295,6 +1576,9 @@ function loadPreset(name) {
 }
 
 function resetForm() {
+  passthroughDoc  = null;
+  passthroughText = null;
+  document.getElementById('passthrough-badge').style.display = 'none';
   state.name='my-app'; state.namespace='default'; state.replicas=1;
   state.labels=[['app','my-app']]; state.annotations=[];
   state.containers=[{name:'main',image:'nginx',tag:'latest',pullPolicy:'IfNotPresent',ports:[{containerPort:80,protocol:'TCP',name:''}],env:[],requestsCPU:'100m',requestsMem:'128Mi',limitsCPU:'500m',limitsMem:'512Mi',liveness:false,livenessPath:'/healthz',livenessPort:80,livenessDelay:10,readiness:false,readinessPath:'/ready',readinessPort:80,readinessDelay:5}];
@@ -1316,7 +1600,8 @@ function validateYaml() {
 }
 
 function copyYaml() {
-  navigator.clipboard.writeText(generateYaml()).then(() => {
+  const yaml = passthroughMode && passthroughDoc ? generatePassthroughYaml() : generateYaml();
+  navigator.clipboard.writeText(yaml).then(() => {
     const btn = document.getElementById('copy-btn');
     btn.classList.add('copy-flash');
     btn.textContent = 'copied!';
@@ -1325,7 +1610,8 @@ function copyYaml() {
 }
 
 function downloadYaml() {
-  const blob = new Blob([generateYaml()], {type:'text/yaml'});
+  const yaml = passthroughMode && passthroughDoc ? generatePassthroughYaml() : generateYaml();
+  const blob = new Blob([yaml], {type:'text/yaml'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `${state.name}.yaml`;
@@ -1344,6 +1630,399 @@ function cycleTheme() {
   if (t === 'coast') document.body.classList.add('theme-coast');
   document.getElementById('theme-btn').textContent = 'theme: ' + THEME_LABELS[t];
 }
+
+// ---- YAML PARSER ----
+// Minimal indentation-aware parser — no external deps.
+// Handles: scalars, block mappings, block sequences, quoted strings, inline {} and [].
+function parseYaml(text) {
+  const lines = text.split('\n');
+  const stack = [{ indent: -1, obj: {} }];
+  let i = 0;
+
+  function top() { return stack[stack.length - 1]; }
+
+  function parseScalar(s) {
+    s = s.trim();
+    if (s === 'true')  return true;
+    if (s === 'false') return false;
+    if (s === 'null' || s === '~') return null;
+    if (/^-?\d+$/.test(s)) return parseInt(s, 10);
+    if (/^-?\d+\.\d+$/.test(s)) return parseFloat(s);
+    // strip quotes
+    if (/^["']/.test(s) && s[0] === s[s.length-1]) return s.slice(1,-1);
+    return s;
+  }
+
+  function getIndent(line) {
+    const m = line.match(/^(\s*)/);
+    return m ? m[1].length : 0;
+  }
+
+  function setVal(parent, key, val) {
+    if (Array.isArray(parent.obj)) {
+      if (typeof parent.obj[parent.obj.length-1] === 'object' && parent.obj[parent.obj.length-1] !== null && key !== null) {
+        parent.obj[parent.obj.length-1][key] = val;
+      } else {
+        parent.obj.push(val);
+      }
+    } else {
+      parent.obj[key] = val;
+    }
+  }
+
+  while (i < lines.length) {
+    const raw = lines[i];
+    const stripped = raw.replace(/#.*$/, '').trimEnd();
+    i++;
+    if (!stripped.trim()) continue;
+
+    const indent = getIndent(stripped);
+    const line = stripped.trim();
+
+    // pop stack to current indent level
+    while (stack.length > 1 && indent <= top().indent) stack.pop();
+
+    // sequence item
+    if (line.startsWith('- ') || line === '-') {
+      const rest = line.startsWith('- ') ? line.slice(2).trim() : '';
+      // ensure parent has array
+      const par = top();
+      if (!Array.isArray(par.obj[par.currentKey])) {
+        par.obj[par.currentKey] = [];
+      }
+      const arr = par.obj[par.currentKey];
+      if (rest.includes(': ') || rest === '') {
+        // mapping item
+        const item = {};
+        arr.push(item);
+        stack.push({ indent, obj: item, isSeqItem: true });
+        if (rest) {
+          // inline first key of mapping
+          const ci = rest.indexOf(': ');
+          if (ci !== -1) {
+            const k = rest.slice(0, ci);
+            const v = rest.slice(ci+2).trim();
+            if (v) item[k] = parseScalar(v);
+            else stack.push({ indent: indent+2, obj: item, currentKey: k });
+          }
+        }
+      } else {
+        // scalar item
+        arr.push(parseScalar(rest));
+      }
+      continue;
+    }
+
+    // key: value
+    const colonIdx = line.indexOf(': ');
+    const isKeyOnly = line.endsWith(':');
+    if (colonIdx !== -1 || isKeyOnly) {
+      const key = isKeyOnly ? line.slice(0,-1) : line.slice(0, colonIdx);
+      const valStr = isKeyOnly ? '' : line.slice(colonIdx+2).trim();
+
+      const par = top();
+      par.currentKey = key;
+
+      if (!valStr || valStr === '|' || valStr === '>') {
+        // next lines are either a nested block or block scalar
+        if (Array.isArray(par.obj)) {
+          const lastItem = par.obj[par.obj.length-1];
+          if (typeof lastItem === 'object' && lastItem !== null) {
+            lastItem[key] = {};
+            stack.push({ indent, obj: lastItem[key], currentKey: null });
+          }
+        } else {
+          par.obj[key] = {};
+          stack.push({ indent, obj: par.obj[key], currentKey: null });
+        }
+      } else if (valStr === '{}') {
+        if (Array.isArray(par.obj)) {
+          const last = par.obj[par.obj.length-1];
+          if (typeof last === 'object') last[key] = {};
+        } else {
+          par.obj[key] = {};
+        }
+      } else if (valStr.startsWith('[')) {
+        // inline array
+        const inner = valStr.slice(1, valStr.lastIndexOf(']'));
+        const arr = inner.split(',').map(s => parseScalar(s.trim())).filter(s => s !== '');
+        if (Array.isArray(par.obj)) {
+          const last = par.obj[par.obj.length-1];
+          if (typeof last === 'object') last[key] = arr;
+        } else {
+          par.obj[key] = arr;
+        }
+      } else {
+        const parsed = parseScalar(valStr);
+        if (Array.isArray(par.obj)) {
+          const last = par.obj[par.obj.length-1];
+          if (typeof last === 'object' && last !== null) last[key] = parsed;
+        } else {
+          par.obj[key] = parsed;
+        }
+      }
+      continue;
+    }
+  }
+
+  return stack[0].obj;
+}
+
+// ---- RESOURCE MAPPERS ----
+function defaultContainer() {
+  return {
+    name:'main', image:'nginx', tag:'latest', pullPolicy:'IfNotPresent',
+    ports:[{containerPort:80, protocol:'TCP', name:''}], env:[],
+    requestsCPU:'100m', requestsMem:'128Mi', limitsCPU:'500m', limitsMem:'512Mi',
+    liveness:false, livenessPath:'/healthz', livenessPort:80, livenessDelay:10,
+    readiness:false, readinessPath:'/ready', readinessPort:80, readinessDelay:5,
+  };
+}
+
+function mapContainerSpec(raw) {
+  const c = defaultContainer();
+  if (!raw) return c;
+  c.name = raw.name || c.name;
+  const imgParts = (raw.image || 'nginx:latest').split(':');
+  c.image = imgParts[0];
+  c.tag   = imgParts[1] || 'latest';
+  c.pullPolicy = raw.imagePullPolicy || c.pullPolicy;
+
+  if (Array.isArray(raw.ports)) {
+    c.ports = raw.ports.map(p => ({
+      containerPort: p.containerPort || 80,
+      protocol: p.protocol || 'TCP',
+      name: p.name || '',
+    }));
+  }
+  if (Array.isArray(raw.env)) {
+    c.env = raw.env.map(e => [e.name||'', String(e.value||e.valueFrom||'')]);
+  }
+  const req = raw.resources?.requests || {};
+  const lim = raw.resources?.limits   || {};
+  c.requestsCPU = req.cpu    || c.requestsCPU;
+  c.requestsMem = req.memory || c.requestsMem;
+  c.limitsCPU   = lim.cpu    || c.limitsCPU;
+  c.limitsMem   = lim.memory || c.limitsMem;
+
+  const lv = raw.livenessProbe;
+  if (lv) {
+    c.liveness      = true;
+    c.livenessPath  = lv.httpGet?.path  || c.livenessPath;
+    c.livenessPort  = lv.httpGet?.port  || c.livenessPort;
+    c.livenessDelay = lv.initialDelaySeconds || c.livenessDelay;
+  }
+  const rd = raw.readinessProbe;
+  if (rd) {
+    c.readiness      = true;
+    c.readinessPath  = rd.httpGet?.path  || c.readinessPath;
+    c.readinessPort  = rd.httpGet?.port  || c.readinessPort;
+    c.readinessDelay = rd.initialDelaySeconds || c.readinessDelay;
+  }
+  return c;
+}
+
+function mapPodSpec(podSpec) {
+  if (!podSpec) return;
+  state.serviceAccountName = podSpec.serviceAccountName || '';
+  state.hostNetwork = podSpec.hostNetwork || false;
+  state.dnsPolicy   = podSpec.dnsPolicy   || 'ClusterFirst';
+
+  if (Array.isArray(podSpec.containers)) {
+    state.containers = podSpec.containers.map(mapContainerSpec);
+  }
+
+  if (Array.isArray(podSpec.volumes)) {
+    state.volumes = podSpec.volumes.map(v => {
+      if (v.emptyDir !== undefined)           return { name: v.name, type: 'emptyDir',               ref: '' };
+      if (v.configMap)                        return { name: v.name, type: 'configMap',               ref: v.configMap.name || '' };
+      if (v.secret)                           return { name: v.name, type: 'secret',                  ref: v.secret.secretName || '' };
+      if (v.persistentVolumeClaim)            return { name: v.name, type: 'persistentVolumeClaim',   ref: v.persistentVolumeClaim.claimName || '' };
+      if (v.hostPath)                         return { name: v.name, type: 'hostPath',                ref: v.hostPath.path || '' };
+      return { name: v.name, type: 'emptyDir', ref: '' };
+    });
+  }
+
+  const paa = podSpec.affinity?.podAntiAffinity;
+  if (paa) {
+    state.podAntiAffinity = true;
+    const terms = paa.preferredDuringSchedulingIgnoredDuringExecution;
+    if (Array.isArray(terms) && terms[0]) {
+      state.topologyKey = terms[0].podAffinityTerm?.topologyKey || state.topologyKey;
+    }
+  }
+}
+
+function mapMeta(meta) {
+  state.name      = meta?.name      || 'my-app';
+  state.namespace = meta?.namespace || 'default';
+  state.labels      = Object.entries(meta?.labels      || {});
+  state.annotations = Object.entries(meta?.annotations || {});
+}
+
+function mapDeployment(doc) {
+  mapMeta(doc.metadata);
+  const spec = doc.spec || {};
+  state.replicas = spec.replicas || 1;
+  const strat = spec.strategy || {};
+  state.strategy       = strat.type || 'RollingUpdate';
+  state.maxSurge       = strat.rollingUpdate?.maxSurge       || '25%';
+  state.maxUnavailable = strat.rollingUpdate?.maxUnavailable || '25%';
+  mapPodSpec(spec.template?.spec);
+}
+
+function mapService(doc) {
+  mapMeta(doc.metadata);
+  const spec = doc.spec || {};
+  state.serviceType = spec.type || 'ClusterIP';
+  if (Array.isArray(spec.ports)) {
+    state.servicePorts = spec.ports.map(p => ({
+      name: p.name || 'port',
+      port: p.port || 80,
+      targetPort: p.targetPort || p.port || 80,
+      protocol: p.protocol || 'TCP',
+    }));
+  }
+}
+
+function mapIngress(doc) {
+  mapMeta(doc.metadata);
+  const spec = doc.spec || {};
+  const rule = spec.rules?.[0] || {};
+  const path = rule.http?.paths?.[0] || {};
+  state.ingressHost        = rule.host || 'example.com';
+  state.ingressPath        = path.path || '/';
+  state.ingressClass       = doc.metadata?.annotations?.['kubernetes.io/ingress.class'] || 'nginx';
+  state.ingressServiceName = path.backend?.service?.name || 'my-app';
+  state.ingressServicePort = path.backend?.service?.port?.number || 80;
+  const tls = spec.tls?.[0];
+  if (tls) {
+    state.tlsEnabled = true;
+    state.tlsSecret  = tls.secretName || '';
+  }
+}
+
+function mapConfigMap(doc) {
+  mapMeta(doc.metadata);
+  state.configMapData = Object.entries(doc.data || {});
+}
+
+function mapCronJob(doc) {
+  mapMeta(doc.metadata);
+  const spec = doc.spec || {};
+  state.schedule            = spec.schedule            || '0 * * * *';
+  state.concurrencyPolicy   = spec.concurrencyPolicy   || 'Forbid';
+  state.successfulJobsLimit = spec.successfulJobsHistoryLimit ?? 3;
+  state.failedJobsLimit     = spec.failedJobsHistoryLimit     ?? 1;
+  mapPodSpec(spec.jobTemplate?.spec?.template?.spec);
+}
+
+// ---- LOADER ----
+function toast(msg, type='success', dur=2800) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + type;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.className = ''; }, dur);
+}
+
+function ingestYaml(text, stayOnRaw) {
+  let doc;
+  try {
+    doc = parseYaml(text);
+  } catch(e) {
+    toast('parse error: ' + e.message, 'error'); return;
+  }
+
+  const kind = doc.kind;
+  const RESOURCE_MAP = {
+    'Deployment': 'Deployment',
+    'Service':    'Service',
+    'ConfigMap':  'ConfigMap',
+    'Ingress':    'Ingress',
+    'CronJob':    'CronJob',
+  };
+  const r = RESOURCE_MAP[kind];
+  if (!r) {
+    toast(`unsupported kind: ${kind || '(none found)'}`, 'error'); return;
+  }
+
+  // store original for passthrough — save before resetForm() which would null it
+  const savedDoc  = JSON.parse(JSON.stringify(doc));
+  const savedText = text;
+
+  resetForm();
+  state.resource = r;
+
+  // restore after reset
+  passthroughDoc  = savedDoc;
+  passthroughText = savedText;
+
+  if (passthroughMode) {
+    document.getElementById('passthrough-badge').style.display = 'inline-flex';
+  }
+
+  try {
+    if (r === 'Deployment') mapDeployment(doc);
+    if (r === 'Service')    mapService(doc);
+    if (r === 'ConfigMap')  mapConfigMap(doc);
+    if (r === 'Ingress')    mapIngress(doc);
+    if (r === 'CronJob')    mapCronJob(doc);
+  } catch(e) {
+    toast('mapping error: ' + e.message, 'error'); return;
+  }
+
+  // sync UI
+  const tabIndex = ['Deployment','Service','ConfigMap','Ingress','CronJob'].indexOf(r);
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', i === tabIndex));
+  document.getElementById('resource-label').textContent = '/ ' + r;
+  document.querySelectorAll('.status-item')[1].innerHTML = '<div class="dot"></div>' + r;
+
+  if (!stayOnRaw) {
+    // return to metadata form view
+    document.getElementById('raw-panel').style.display  = 'none';
+    document.getElementById('form-panel').style.display = '';
+    document.querySelectorAll('.sidebar-item').forEach((el,i) => el.classList.toggle('active', i === 0));
+    renderForm('metadata');
+  } else {
+    renderForm('metadata'); // still need state synced even if we stay on raw
+  }
+
+  updateOutput();
+  toast(`loaded ${r}: ${state.name}`, 'success');
+}
+
+function loadYamlFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => ingestYaml(e.target.result);
+  reader.readAsText(file);
+  event.target.value = ''; // reset so same file can be re-loaded
+}
+
+// ---- DRAG AND DROP ----
+document.addEventListener('dragover', e => {
+  e.preventDefault();
+  document.getElementById('drop-overlay').classList.add('active');
+});
+document.addEventListener('dragleave', e => {
+  if (e.relatedTarget === null) {
+    document.getElementById('drop-overlay').classList.remove('active');
+  }
+});
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  document.getElementById('drop-overlay').classList.remove('active');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  if (!/\.(yaml|yml)$/i.test(file.name)) {
+    toast('not a .yaml file', 'error'); return;
+  }
+  const reader = new FileReader();
+  reader.onload = ev => ingestYaml(ev.target.result);
+  reader.readAsText(file);
+});
 
 // ---- INIT ----
 renderForm('metadata');
