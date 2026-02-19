@@ -862,12 +862,14 @@ function togglePassthrough(enabled) {
 }
 
 // Deep-merge src into dst in-place, preserving keys in dst not present in src.
+// Arrays are replaced wholesale EXCEPT containers -- those get name-matched below.
 function deepMerge(dst, src) {
   if (typeof src !== 'object' || src === null) return;
   for (const key of Object.keys(src)) {
     if (Array.isArray(src[key])) {
       dst[key] = src[key];
-    } else if (typeof src[key] === 'object' && src[key] !== null && typeof dst[key] === 'object' && dst[key] !== null && !Array.isArray(dst[key])) {
+    } else if (typeof src[key] === 'object' && src[key] !== null &&
+               typeof dst[key] === 'object' && dst[key] !== null && !Array.isArray(dst[key])) {
       deepMerge(dst[key], src[key]);
     } else {
       dst[key] = src[key];
@@ -875,7 +877,80 @@ function deepMerge(dst, src) {
   }
 }
 
-// Re-serialize a plain JS object back to YAML string.
+// Merge two container arrays by name.
+// For each container in oursArr:
+//   - if a container with the same name exists in originalArr, merge our
+//     known fields on top of the original (preserving startupProbe,
+//     securityContext, lifecycle, etc.)
+//   - if no match, it's a new container -- append it as-is
+// Containers in originalArr with no match in oursArr are dropped (user removed them).
+function mergeContainerArrays(originalArr, oursArr) {
+  if (!Array.isArray(originalArr) || !Array.isArray(oursArr)) return oursArr;
+  const byName = {};
+  for (const c of originalArr) {
+    if (c && c.name) byName[c.name] = JSON.parse(JSON.stringify(c));
+  }
+  return oursArr.map(ourContainer => {
+    const original = byName[ourContainer.name];
+    if (!original) return ourContainer; // new container, no original to preserve
+    // merge our fields onto the original, field by field
+    deepMerge(original, ourContainer);
+    return original;
+  });
+}
+
+// Return the containers array path for a given resource kind.
+// Returns an array of keys to walk into the merged doc to find spec.containers.
+function containerPath(kind) {
+  if (kind === 'Deployment' || kind === 'DaemonSet' || kind === 'StatefulSet') {
+    return ['spec', 'template', 'spec', 'containers'];
+  }
+  if (kind === 'CronJob') {
+    return ['spec', 'jobTemplate', 'spec', 'template', 'spec', 'containers'];
+  }
+  return null;
+}
+
+// Walk a key path into an object, return [parentObj, finalKey] or null.
+function walkPath(obj, keys) {
+  let cur = obj;
+  for (let i = 0; i < keys.length - 1; i++) {
+    if (typeof cur !== 'object' || cur === null || !(keys[i] in cur)) return null;
+    cur = cur[keys[i]];
+  }
+  return [cur, keys[keys.length - 1]];
+}
+
+// Build the passthrough-merged YAML: start from original doc, deep-merge
+// our freshly generated fields, then fix up container arrays name-by-name.
+function generatePassthroughYaml() {
+  if (!passthroughDoc) return generateYaml();
+  const merged = JSON.parse(JSON.stringify(passthroughDoc));
+  let ours;
+  try { ours = parseYaml(generateYaml()); } catch(e) { return generateYaml(); }
+
+  // standard deep merge (replaces arrays wholesale for now)
+  deepMerge(merged, ours);
+
+  // fix up containers: re-run a name-matched merge so per-container unknowns survive
+  const kind = merged.kind || state.resource;
+  const path = containerPath(kind);
+  if (path) {
+    const [mergedParent, finalKey] = walkPath(merged, path) || [null, null];
+    const [oursParent]             = walkPath(ours,   path) || [null, null];
+    const [origParent]             = walkPath(JSON.parse(JSON.stringify(passthroughDoc)), path) || [null, null];
+
+    if (mergedParent && oursParent && origParent) {
+      const origContainers = origParent[finalKey];
+      const ourContainers  = oursParent[finalKey];
+      if (Array.isArray(origContainers) && Array.isArray(ourContainers)) {
+        mergedParent[finalKey] = mergeContainerArrays(origContainers, ourContainers);
+      }
+    }
+  }
+
+  return serializeYaml(merged) + '\n';
+}
 function serializeYaml(obj, indent) {
   indent = indent || 0;
   const sp  = '  '.repeat(indent);
