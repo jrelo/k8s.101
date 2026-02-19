@@ -8,7 +8,8 @@ Generate new YAML or load an existing config to edit. Supports Deployment, Servi
 
 <img width="2047" height="963" alt="image" src="https://github.com/user-attachments/assets/2498349f-37f5-4751-a875-b8f5f9befe3a" />
 
-### Features
+
+# Features
 
 ## Resource types
 
@@ -20,7 +21,7 @@ Generate and edit YAML for five Kubernetes resource kinds:
 - Ingress
 - CronJob
 
----
+
 
 ## Loading
 
@@ -28,7 +29,7 @@ Generate and edit YAML for five Kubernetes resource kinds:
 - **File picker** - use the `load .yaml` button in the top bar
 - Detected resource kind switches the active tab and populates all recognized form fields automatically
 
----
+
 
 ## Passthrough mode
 
@@ -37,7 +38,7 @@ Generate and edit YAML for five Kubernetes resource kinds:
 - Your edits win over the original where fields overlap
 - Badge appears in the header when passthrough is active and a file is loaded
 
----
+
 
 ## Raw editor
 
@@ -47,7 +48,7 @@ Generate and edit YAML for five Kubernetes resource kinds:
 - `reset to current` discards edits and syncs from form state
 - Tab key inserts 2 spaces
 
----
+
 
 ## Form sections
 
@@ -64,7 +65,7 @@ Sidebar navigation breaks the config into focused sections:
 - **Labels & Annotations** - metadata labels, annotations, and service ports
 - **Affinity** - preferred pod anti-affinity with configurable topology key
 
----
+
 
 ## Output
 
