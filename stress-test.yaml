@@ -1,0 +1,389 @@
+---
+# stress-test.yaml
+# Designed to exercise every code path in k8s.101 and validate-yaml.py.
+#
+# Drop this file onto k8s.101 to test:
+#   - passthrough preservation (initContainers, startupProbe, securityContext,
+#     lifecycle hooks, topologySpreadConstraints, custom annotations, node affinity)
+#   - multi-container parsing and rendering
+#   - all five volume types in one spec
+#   - quoting edge cases (version strings, boolean-like values, numeric strings,
+#     colons in annotation values, non-ASCII in comments only)
+#   - liveness + readiness probes on both containers
+#   - serviceAccountName, dnsPolicy, terminationGracePeriodSeconds
+#   - pod anti-affinity (preferred) which maps into the form
+#   - labels and annotations with values that require quoting
+#
+# Then export with passthrough ON and run:
+#   python3 validate-yaml.py <exported-file.yaml>
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stress-test-worker
+  namespace: stress-ns
+  labels:
+    app: stress-test-worker
+    tier: backend
+    team: platform
+    version: "3.1.4"
+    environment: staging
+    managed: "true"
+    replica-count: "4"
+  annotations:
+    # standard tooling annotations
+    kubernetes.io/change-cause: "release 3.1.4 stress test deployment"
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: /metrics
+    # argocd / gitops
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/managed-by: argocd
+    # vault agent injection
+    vault.hashicorp.com/agent-inject: "true"
+    vault.hashicorp.com/agent-inject-secret-app: secret/data/stress/app
+    vault.hashicorp.com/agent-inject-secret-db: secret/data/stress/postgres
+    vault.hashicorp.com/role: stress-test-worker
+    vault.hashicorp.com/agent-limits-cpu: 250m
+    vault.hashicorp.com/agent-limits-mem: 128Mi
+    # istio
+    sidecar.istio.io/inject: "true"
+    sidecar.istio.io/proxyCPU: 100m
+    sidecar.istio.io/proxyCPULimit: 500m
+    # karpenter / cluster autoscaler hints
+    cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
+    karpenter.sh/do-not-evict: "false"
+    # custom internal tooling -- should survive passthrough entirely
+    deploy.internal/managed-by: helm
+    deploy.internal/chart: stress-worker
+    deploy.internal/chart-version: "1.2.3"
+    deploy.internal/notify-channel: platform-alerts
+    deploy.internal/rollback-limit: "5"
+    # datadog
+    ad.datadoghq.com/stress-worker.check_names: '["openmetrics"]'
+    ad.datadoghq.com/stress-worker.init_configs: "[{}]"
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: stress-test-worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: stress-test-worker
+        tier: backend
+        version: "3.1.4"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        sidecar.istio.io/inject: "true"
+        # per-pod rollout annotation used by some CD tooling
+        rollout.argoproj.io/revision: "7"
+    spec:
+      serviceAccountName: stress-worker-sa
+      terminationGracePeriodSeconds: 90
+      dnsPolicy: ClusterFirst
+      automountServiceAccountToken: false
+
+      # init containers -- not modeled by the form, passthrough test
+      initContainers:
+        - name: db-migrate
+          image: flyway/flyway:10-alpine
+          args:
+            - -url=jdbc:postgresql://$(DB_HOST):5432/stressdb
+            - -user=$(DB_USER)
+            - -password=$(DB_PASS)
+            - migrate
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-creds
+                  key: host
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-creds
+                  key: username
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-creds
+                  key: password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+        - name: config-renderer
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - envsubst < /templates/app.conf > /config/app.conf
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: config-rendered
+              mountPath: /config
+
+      containers:
+        - name: stress-worker
+          image: gcr.io/our-project/stress-worker:3.1.4
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+              name: http
+            - containerPort: 9090
+              protocol: TCP
+              name: metrics
+            - containerPort: 8443
+              protocol: TCP
+              name: https
+          env:
+            - name: LOG_LEVEL
+              value: debug
+            - name: WORKER_THREADS
+              value: "16"
+            - name: QUEUE_URL
+              value: "amqp://rabbitmq.platform:5672"
+            - name: FEATURE_FLAGS
+              value: "true"
+            - name: MAX_RETRIES
+              value: "3"
+            - name: BUILD_VERSION
+              value: "3.1.4"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.observability:4317
+            - name: OTEL_SERVICE_NAME
+              value: stress-worker
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-creds
+                  key: host
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: api-key
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          livenessProbe:
+            httpGet:
+              path: /healthz/live
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz/ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+          # startupProbe -- not modeled, passthrough test
+          startupProbe:
+            httpGet:
+              path: /healthz/startup
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 5
+          # lifecycle -- not modeled, passthrough test
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - sleep 20
+          # container securityContext -- not modeled, passthrough test
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: vault-secrets
+              mountPath: /vault/secrets
+              readOnly: true
+            - name: config-rendered
+              mountPath: /etc/app
+              readOnly: true
+            - name: app-data
+              mountPath: /data
+
+        - name: metrics-proxy
+          image: prom/pushgateway:v1.7.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9091
+              protocol: TCP
+              name: pushgw
+          env:
+            - name: LOG_FORMAT
+              value: json
+            - name: LOG_LEVEL
+              value: warn
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9091
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9091
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65534
+
+        - name: log-shipper
+          image: fluent/fluent-bit:3.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 2020
+              protocol: TCP
+              name: fb-metrics
+          env:
+            - name: LOKI_HOST
+              value: loki.observability.svc.cluster.local
+            - name: LOKI_PORT
+              value: "3100"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+
+      # all five volume types in one spec
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: vault-secrets
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        - name: config-rendered
+          configMap:
+            name: stress-worker-config
+            defaultMode: 0440
+        - name: app-secrets
+          secret:
+            secretName: app-secrets
+            defaultMode: 0400
+        - name: app-data
+          persistentVolumeClaim:
+            claimName: stress-worker-pvc
+            readOnly: false
+        - name: varlog
+          hostPath:
+            path: /var/log
+            type: Directory
+
+      # pod-level securityContext -- not modeled, passthrough test
+      securityContext:
+        fsGroup: 2000
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      # preferred pod anti-affinity -- this one maps into the form
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - stress-test-worker
+                topologyKey: kubernetes.io/hostname
+        # node affinity -- not modeled, passthrough test
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 50
+              preference:
+                matchExpressions:
+                  - key: node.kubernetes.io/instance-type
+                    operator: In
+                    values:
+                      - m5.xlarge
+                      - m5.2xlarge
+                      - m6i.xlarge
+
+      # topologySpreadConstraints -- not modeled, passthrough test
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: stress-test-worker
+        - maxSkew: 2
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: stress-test-worker
+
+      imagePullSecrets:
+        - name: gcr-credentials
+
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: platform
+          effect: NoSchedule
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 60
