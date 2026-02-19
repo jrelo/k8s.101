@@ -12,8 +12,7 @@ This is not a bug tracker, just a running list of things we know about.
 
 ## Passthrough
 
-- Per-container unknown fields (`startupProbe`, container-level `securityContext`, `lifecycle` hooks) do not survive passthrough. The `containers` array is replaced wholesale on merge. Pod-level unknowns (initContainers, pod securityContext, topologySpreadConstraints, nodeAffinity, tolerations) are preserved correctly.
-- This is noted in the UI tooltip but is the most likely source of a real incident if someone isn't paying attention.
+- ~~Per-container unknown fields dropped on merge~~ -- fixed. Containers are now matched by name and merged field-by-field. `startupProbe`, container-level `securityContext`, `lifecycle` hooks all survive. A container removed from the form is dropped. A new container added in the form is appended. Pod-level unknowns were already safe.
 
 ## Missing resource kinds
 
