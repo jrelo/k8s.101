@@ -726,7 +726,7 @@
         <span class="dot"></span>passthrough
       </span>
       <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-family:var(--mono);font-size:10px;color:var(--text3)">
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-family:var(--mono);font-size:10px;color:var(--text3)" title="Pod-level unknown fields (initContainers, securityContext, topologySpreadConstraints, custom affinity) are preserved. Container arrays are replaced wholesale, so per-container unknowns like startupProbe or securityContext will not survive.">
           <input type="checkbox" id="passthrough-toggle" style="width:12px;height:12px;accent-color:var(--yellow)" onchange="togglePassthrough(this.checked)">
           preserve unknown fields
         </label>
@@ -878,30 +878,39 @@ function deepMerge(dst, src) {
 // Re-serialize a plain JS object back to YAML string.
 function serializeYaml(obj, indent) {
   indent = indent || 0;
-  const sp = '  '.repeat(indent);
+  const sp  = '  '.repeat(indent);
+  const sp1 = '  '.repeat(indent + 1);
   if (obj === null || obj === undefined) return 'null';
   if (typeof obj === 'boolean') return obj.toString();
   if (typeof obj === 'number') return obj.toString();
   if (typeof obj === 'string') {
-    if (/[:{}\[\],&*?|<>=!%@`#\n]/.test(obj) || obj === '' || /^\s/.test(obj) || /\s$/.test(obj)) {
-      return '"' + obj.replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/\n/g,'\\n') + '"';
+    const s = obj;
+    if (/[:{}\[\],&*?|<>=!%@`#\n\\]/.test(s) || s === '' ||
+        s === 'true' || s === 'false' || s === 'null' || s === '~' ||
+        /^-?\d+(\.\d+)?$/.test(s) ||
+        (/^\d[\d.]*\d$/.test(s) && s.split('.').length > 2) ||
+        /[^\x00-\x7F]/.test(s) ||
+        /^\s/.test(s) || /\s$/.test(s)) {
+      return '"' + s.replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/\n/g,'\\n') + '"';
     }
-    return obj;
+    return s;
   }
   if (Array.isArray(obj)) {
     if (obj.length === 0) return '[]';
     return obj.map(item => {
       if (typeof item === 'object' && item !== null) {
+        // render the mapping at indent+1, then replace the leading spaces of
+        // the first line with "- " to produce correct YAML sequence syntax
         const inner = serializeYaml(item, indent + 1);
-        // first key on same line as dash
         const lines = inner.split('\n');
-        lines[0] = sp + '- ' + lines[0].trimStart();
+        // first line: swap indent+1 spaces for indent spaces + "- "
+        lines[0] = sp + '- ' + lines[0].slice(sp1.length);
         return lines.join('\n');
       }
       return sp + '- ' + serializeYaml(item, 0);
     }).join('\n');
   }
-  // object
+  // object/mapping
   const keys = Object.keys(obj);
   if (keys.length === 0) return '{}';
   return keys.map(k => {
@@ -1043,7 +1052,7 @@ function renderForm(section) {
 
   if (section === 'ports') {
     state.containers.forEach((c, ci) => {
-      const grp = makeGroup(`${c.name || 'container['+ci+']'} — ports`, []);
+      const grp = makeGroup(`${c.name || 'container['+ci+']'}: ports`, []);
       const portList = document.createElement('div');
       c.ports.forEach((p, pi) => {
         portList.appendChild(makePortRow(ci, pi, p));
@@ -1061,7 +1070,7 @@ function renderForm(section) {
 
   if (section === 'env') {
     state.containers.forEach((c, ci) => {
-      const grp = makeGroup(`${c.name || 'container['+ci+']'} — env vars`, []);
+      const grp = makeGroup(`${c.name || 'container['+ci+']'}: env vars`, []);
       grp.appendChild(makeKVEditor(`containers[${ci}].env`, c.env, true));
       el.appendChild(grp);
     });
@@ -1069,7 +1078,7 @@ function renderForm(section) {
 
   if (section === 'resources') {
     state.containers.forEach((c, ci) => {
-      el.appendChild(makeGroup(`${c.name} — resource limits`, [
+      el.appendChild(makeGroup(`${c.name}: resource limits`, [
         makeField(`rcpu${ci}`, 'Req CPU', 'text', c.requestsCPU, v => state.containers[ci].requestsCPU = v),
         makeField(`rmem${ci}`, 'Req Memory', 'text', c.requestsMem, v => state.containers[ci].requestsMem = v),
         makeField(`lcpu${ci}`, 'Limit CPU', 'text', c.limitsCPU, v => state.containers[ci].limitsCPU = v),
@@ -1080,13 +1089,13 @@ function renderForm(section) {
 
   if (section === 'probes') {
     state.containers.forEach((c, ci) => {
-      el.appendChild(makeGroup(`${c.name} — liveness probe`, [
+      el.appendChild(makeGroup(`${c.name}: liveness probe`, [
         makeToggle(`lv${ci}`, 'Enable liveness', c.liveness, v => { state.containers[ci].liveness = v; renderForm('probes'); }),
         c.liveness ? makeField(`lvp${ci}`, 'HTTP Path', 'text', c.livenessPath, v => state.containers[ci].livenessPath = v) : null,
         c.liveness ? makeField(`lvport${ci}`, 'Port', 'number', c.livenessPort, v => state.containers[ci].livenessPort = parseInt(v)||80) : null,
         c.liveness ? makeField(`lvd${ci}`, 'Initial Delay', 'number', c.livenessDelay, v => state.containers[ci].livenessDelay = parseInt(v)||10) : null,
       ].filter(Boolean)));
-      el.appendChild(makeGroup(`${c.name} — readiness probe`, [
+      el.appendChild(makeGroup(`${c.name}: readiness probe`, [
         makeToggle(`rd${ci}`, 'Enable readiness', c.readiness, v => { state.containers[ci].readiness = v; renderForm('probes'); }),
         c.readiness ? makeField(`rdp${ci}`, 'HTTP Path', 'text', c.readinessPath, v => state.containers[ci].readinessPath = v) : null,
         c.readiness ? makeField(`rdport${ci}`, 'Port', 'number', c.readinessPort, v => state.containers[ci].readinessPort = parseInt(v)||80) : null,
@@ -1323,86 +1332,115 @@ function generateYaml() {
 }
 
 function ind(n) { return '  '.repeat(n); }
-function q(v) { return /[:{}\[\],&*?|<>=!%@`#]/.test(String(v)) ? `"${v}"` : String(v); }
 
-function buildContainerSpec(c) {
+// Quote a scalar value for YAML output.
+// Strings that look like numbers, booleans, null, or contain special chars must be quoted.
+function q(v) {
+  const s = String(v);
+  // always quote if it contains YAML special characters
+  if (/[:{}\[\],&*?|<>=!%@`#\n\\]/.test(s)) return `"${s.replace(/\\/g,'\\\\').replace(/"/g,'\\"')}"`;
+  // quote if it parses as a non-string YAML scalar
+  if (s === '' || s === 'true' || s === 'false' || s === 'null' || s === '~') return `"${s}"`;
+  if (/^-?\d+(\.\d+)?$/.test(s)) return `"${s}"`;  // pure integer or float
+  // quote version strings like 2.4.1 that look numeric but aren't
+  if (/^\d[\d.]*\d$/.test(s) && s.split('.').length > 2) return `"${s}"`;
+  // quote non-ASCII (catches em dash, smart quotes, etc.)
+  if (/[^\x00-\x7F]/.test(s)) return `"${s.replace(/"/g,'\\"')}"`;
+  return s;
+}
+
+function buildContainerSpec(c, baseIndent) {
+  // baseIndent: number of indent levels this container block sits at
+  // e.g. under spec.containers = 3 levels deep in a Deployment
+  const b = '  '.repeat(baseIndent);
+  const b1 = '  '.repeat(baseIndent + 1);
+  const b2 = '  '.repeat(baseIndent + 2);
+  const b3 = '  '.repeat(baseIndent + 3);
   let out = '';
-  out += `- name: ${c.name}\n`;
-  out += `  image: ${c.image}:${c.tag}\n`;
-  out += `  imagePullPolicy: ${c.pullPolicy}\n`;
+  out += `${b}- name: ${c.name}\n`;
+  out += `${b1}image: ${c.image}:${c.tag}\n`;
+  out += `${b1}imagePullPolicy: ${c.pullPolicy}\n`;
   if (c.ports.length) {
-    out += `  ports:\n`;
+    out += `${b1}ports:\n`;
     c.ports.forEach(p => {
-      out += `  - containerPort: ${p.containerPort}\n`;
-      out += `    protocol: ${p.protocol}\n`;
-      if (p.name) out += `    name: ${p.name}\n`;
+      out += `${b1}- containerPort: ${p.containerPort}\n`;
+      out += `${b2}protocol: ${p.protocol}\n`;
+      if (p.name) out += `${b2}name: ${p.name}\n`;
     });
   }
   if (c.env.length) {
-    out += `  env:\n`;
+    out += `${b1}env:\n`;
     c.env.filter(([k])=>k).forEach(([k,v]) => {
-      out += `  - name: ${k}\n`;
-      out += `    value: ${q(v)}\n`;
+      out += `${b1}- name: ${k}\n`;
+      out += `${b2}value: ${q(v)}\n`;
     });
   }
-  out += `  resources:\n`;
-  out += `    requests:\n`;
-  out += `      cpu: ${c.requestsCPU}\n`;
-  out += `      memory: ${c.requestsMem}\n`;
-  out += `    limits:\n`;
-  out += `      cpu: ${c.limitsCPU}\n`;
-  out += `      memory: ${c.limitsMem}\n`;
+  out += `${b1}resources:\n`;
+  out += `${b2}requests:\n`;
+  out += `${b3}cpu: ${c.requestsCPU}\n`;
+  out += `${b3}memory: ${c.requestsMem}\n`;
+  out += `${b2}limits:\n`;
+  out += `${b3}cpu: ${c.limitsCPU}\n`;
+  out += `${b3}memory: ${c.limitsMem}\n`;
   if (c.liveness) {
-    out += `  livenessProbe:\n`;
-    out += `    httpGet:\n`;
-    out += `      path: ${c.livenessPath}\n`;
-    out += `      port: ${c.livenessPort}\n`;
-    out += `    initialDelaySeconds: ${c.livenessDelay}\n`;
-    out += `    periodSeconds: 10\n`;
+    out += `${b1}livenessProbe:\n`;
+    out += `${b2}httpGet:\n`;
+    out += `${b3}path: ${c.livenessPath}\n`;
+    out += `${b3}port: ${c.livenessPort}\n`;
+    out += `${b2}initialDelaySeconds: ${c.livenessDelay}\n`;
+    out += `${b2}periodSeconds: 10\n`;
   }
   if (c.readiness) {
-    out += `  readinessProbe:\n`;
-    out += `    httpGet:\n`;
-    out += `      path: ${c.readinessPath}\n`;
-    out += `      port: ${c.readinessPort}\n`;
-    out += `    initialDelaySeconds: ${c.readinessDelay}\n`;
-    out += `    periodSeconds: 5\n`;
+    out += `${b1}readinessProbe:\n`;
+    out += `${b2}httpGet:\n`;
+    out += `${b3}path: ${c.readinessPath}\n`;
+    out += `${b3}port: ${c.readinessPort}\n`;
+    out += `${b2}initialDelaySeconds: ${c.readinessDelay}\n`;
+    out += `${b2}periodSeconds: 5\n`;
   }
-  return out.split('\n').map((line,i) => i===0?line:'  '+line).join('\n');
+  return out;
 }
 
-function buildPodSpec() {
+function buildPodSpec(podIndent) {
+  // podIndent: indent level of the pod spec keys (e.g. 3 inside a Deployment)
+  podIndent = podIndent || 0;
+  const p  = '  '.repeat(podIndent);
+  const p1 = '  '.repeat(podIndent + 1);
+  const p2 = '  '.repeat(podIndent + 2);
+  const p3 = '  '.repeat(podIndent + 3);
+  const p4 = '  '.repeat(podIndent + 4);
+  const p5 = '  '.repeat(podIndent + 5);
   let out = '';
-  if (state.serviceAccountName) out += `serviceAccountName: ${state.serviceAccountName}\n`;
-  if (state.hostNetwork) out += `hostNetwork: true\n`;
-  out += `dnsPolicy: ${state.dnsPolicy}\n`;
+  if (state.serviceAccountName) out += `${p}serviceAccountName: ${state.serviceAccountName}\n`;
+  if (state.hostNetwork) out += `${p}hostNetwork: true\n`;
+  out += `${p}dnsPolicy: ${state.dnsPolicy}\n`;
   if (state.podAntiAffinity) {
-    out += `affinity:\n`;
-    out += `  podAntiAffinity:\n`;
-    out += `    preferredDuringSchedulingIgnoredDuringExecution:\n`;
-    out += `    - weight: 100\n`;
-    out += `      podAffinityTerm:\n`;
-    out += `        labelSelector:\n`;
-    out += `          matchExpressions:\n`;
-    out += `          - key: app\n`;
-    out += `            operator: In\n`;
-    out += `            values:\n`;
-    out += `            - ${state.name}\n`;
-    out += `        topologyKey: ${state.topologyKey}\n`;
+    out += `${p}affinity:\n`;
+    out += `${p1}podAntiAffinity:\n`;
+    out += `${p2}preferredDuringSchedulingIgnoredDuringExecution:\n`;
+    out += `${p2}- weight: 100\n`;
+    out += `${p3}podAffinityTerm:\n`;
+    out += `${p4}labelSelector:\n`;
+    out += `${p5}matchExpressions:\n`;
+    out += `${p5}- key: app\n`;
+    out += `${p5}  operator: In\n`;
+    out += `${p5}  values:\n`;
+    out += `${p5}  - ${state.name}\n`;
+    out += `${p4}topologyKey: ${state.topologyKey}\n`;
   }
-  out += `containers:\n`;
+  out += `${p}containers:\n`;
   state.containers.forEach(c => {
-    out += buildContainerSpec(c) + '\n';
+    out += buildContainerSpec(c, podIndent);
   });
   if (state.volumes.length) {
-    out += `volumes:\n`;
+    out += `${p}volumes:\n`;
     state.volumes.forEach(v => {
-      out += `- name: ${v.name}\n`;
-      if (v.type === 'emptyDir') out += `  emptyDir: {}\n`;
-      else if (v.type === 'configMap') out += `  configMap:\n    name: ${v.ref||'my-configmap'}\n`;
-      else if (v.type === 'secret') out += `  secret:\n    secretName: ${v.ref||'my-secret'}\n`;
-      else if (v.type === 'persistentVolumeClaim') out += `  persistentVolumeClaim:\n    claimName: ${v.ref||'my-pvc'}\n`;
-      else if (v.type === 'hostPath') out += `  hostPath:\n    path: ${v.ref||'/tmp'}\n`;
+      out += `${p}- name: ${v.name}\n`;
+      if (v.type === 'emptyDir')                out += `${p1}emptyDir: {}\n`;
+      else if (v.type === 'configMap')           out += `${p1}configMap:\n${p2}name: ${v.ref||'my-configmap'}\n`;
+      else if (v.type === 'secret')              out += `${p1}secret:\n${p2}secretName: ${v.ref||'my-secret'}\n`;
+      else if (v.type === 'persistentVolumeClaim') out += `${p1}persistentVolumeClaim:\n${p2}claimName: ${v.ref||'my-pvc'}\n`;
+      else if (v.type === 'hostPath')            out += `${p1}hostPath:\n${p2}path: ${v.ref||'/tmp'}\n`;
     });
   }
   return out;
@@ -1420,12 +1458,13 @@ function buildDeployment(labels, annotations) {
   for(const[k,v] of Object.entries(sel)) out += `      ${k}: ${q(v)}\n`;
   out += `  strategy:\n    type: ${state.strategy}\n`;
   if (state.strategy === 'RollingUpdate') {
-    out += `    rollingUpdate:\n      maxSurge: ${state.maxSurge}\n      maxUnavailable: ${state.maxUnavailable}\n`;
+    out += `    rollingUpdate:\n      maxSurge: ${q(state.maxSurge)}\n      maxUnavailable: ${q(state.maxUnavailable)}\n`;
   }
   out += `  template:\n    metadata:\n      labels:\n`;
   for(const[k,v] of Object.entries(sel)) out += `        ${k}: ${q(v)}\n`;
   out += `    spec:\n`;
-  buildPodSpec().split('\n').forEach(line => out += `      ${line}\n`);
+  // pod spec keys sit at indent level 3 (apiVersion=0, spec=1, template.spec=3)
+  out += buildPodSpec(3);
   return out.trimEnd() + '\n';
 }
 
@@ -1474,7 +1513,7 @@ function buildCronJob(labels, annotations) {
   let out = `apiVersion: batch/v1\nkind: CronJob\nmetadata:\n`;
   out += `  name: ${state.name}\n  namespace: ${state.namespace}\n`;
   if(Object.keys(labels).length){out+=`  labels:\n`;for(const[k,v] of Object.entries(labels))out+=`    ${k}: ${q(v)}\n`;}
-  out += `spec:\n  schedule: "${state.schedule}"\n`;
+  out += `spec:\n  schedule: ${q(state.schedule)}\n`;
   out += `  concurrencyPolicy: ${state.concurrencyPolicy}\n`;
   out += `  successfulJobsHistoryLimit: ${state.successfulJobsLimit}\n`;
   out += `  failedJobsHistoryLimit: ${state.failedJobsLimit}\n`;
@@ -1482,7 +1521,8 @@ function buildCronJob(labels, annotations) {
   const sel = Object.keys(labels).length ? labels : {app: state.name};
   for(const[k,v] of Object.entries(sel)) out += `            ${k}: ${q(v)}\n`;
   out += `        spec:\n          restartPolicy: OnFailure\n`;
-  buildPodSpec().split('\n').forEach(line => { if (line.trim()) out += `          ${line}\n`; });
+  // pod spec keys at indent 5 (jobTemplate.spec.template.spec)
+  out += buildPodSpec(5);
   return out.trimEnd()+'\n';
 }
 
@@ -1632,7 +1672,7 @@ function cycleTheme() {
 }
 
 // ---- YAML PARSER ----
-// Minimal indentation-aware parser — no external deps.
+// Minimal indentation-aware parser. No external deps.
 // Handles: scalars, block mappings, block sequences, quoted strings, inline {} and [].
 function parseYaml(text) {
   const lines = text.split('\n');
@@ -1947,7 +1987,7 @@ function ingestYaml(text, stayOnRaw) {
     toast(`unsupported kind: ${kind || '(none found)'}`, 'error'); return;
   }
 
-  // store original for passthrough — save before resetForm() which would null it
+  // store original for passthrough. save before resetForm() which would null it
   const savedDoc  = JSON.parse(JSON.stringify(doc));
   const savedText = text;
 
